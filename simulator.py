@@ -127,8 +127,100 @@ class Simulator:
         if self.trackHistory: self.history.append(self.state)
         return self.state
     
+    def apply_phase(self, qi, phi):
+        """Apply the phase (P) gate on qubit qi with angle phi"""
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits.")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            # if qi == 1, multiply amplitude by -1
+            if ((basis_state >> qi) & 1):
+                new_state[basis_state] += amp * cmath.exp(phi*1j)
+            # if qi == 0, no phase added
+            else:
+                new_state[basis_state] += amp
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+
+    def apply_Rx(self, qi, theta):
+        """Apply the Rx (Rotation around X) gate on qubit qi with angle theta"""
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits.")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            if ((basis_state >> qi) & 1): # if qubit i == 1
+                # |1>  --> -isin(theta/2)|0> + cos(theta/2)|1>
+                new_state[basis_state ^ (1 << qi)] += amp * cmath.sin(theta/2) * -1j
+                new_state[basis_state] += amp * cmath.cos(theta/2)
+            else: # qubit i == 0
+                # |0> --> cos(theta/2)|0> -isin(theta/2)|1>
+                new_state[basis_state] += amp * cmath.cos(theta/2)
+                new_state[basis_state ^ (1 << qi)] += amp * cmath.sin(theta/2) * -1j
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+    
+    def apply_Ry(self, qi, theta):
+        """Apply the Ry (Rotation around Y) gate on qubit qi with angle theta"""
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits.")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            if ((basis_state >> qi) & 1): # if qubit i == 1
+                # |1>  --> -sin(theta/2)|0> + cos(theta/2)|1>
+                new_state[basis_state ^ (1 << qi)] += amp * -1 * cmath.sin(theta/2)
+                new_state[basis_state] += amp * cmath.cos(theta/2)
+            else: # qubit i == 0
+                # |0> --> cos(theta/2)|0> + sin(theta/2)|1>
+                new_state[basis_state] += amp * cmath.cos(theta/2)
+                new_state[basis_state ^ (1 << qi)] += amp * cmath.sin(theta/2)
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+    
+    def apply_Rz(self, qi, theta):
+        """Apply the Rz (Rotation around Z) gate on qubit qi with angle theta"""
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits.")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            if ((basis_state >> qi) & 1): # if qubit i == 1
+                # |1>  --> exp(itheta/2)|1>
+                new_state[basis_state] += amp * cmath.exp(1j * theta / 2)
+            else: # qubit i == 0
+                # |0> --> exp(-itheta/2)|0>
+                new_state[basis_state] += amp * cmath.exp(-1j * theta / 2)
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+
+    def apply_swap(self, qi, qj):
+        """Apply the Swap gate, with target qubits qi and qj
+        """
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits. Did you mean to use swap3?")
+        if qi == qj: raise Exception("Target qubits need to be unique")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            i = (basis_state >> qi) & 1 # state of qi
+            j = (basis_state >> qj) & 1 # state of qj
+            # following XORs set the states to 0 for qi,qj, and then place the swapped values
+            #    at those qubits
+            new_basis_state = basis_state ^ (i << qi) ^ (j << qj) ^ (i << qj) ^ (j << qi)
+            new_state[new_basis_state] += amp
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+    
     def apply_cx(self, qc, qi):
-        """Apply the Controlled X gate, with control qubit qc, and target qubit qi
+        """Apply the Controlled X / Controlled Not gate, with control qubit qc,\n
+        and target qubit qi
         """
         if self.qudit != 2: raise Exception("This gate can only be applied on qubits")
         if qc == qi: raise Exception("Control and target qubits need to be unique")
@@ -160,6 +252,44 @@ class Simulator:
                 new_basis_state = basis_state ^ (i << qi) ^ (j << qj) ^ (i << qj) ^ (j << qi)
                 new_state[new_basis_state] += amp
             else: # qubit c == 0, no swap
+                new_state[basis_state] += amp
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+    
+    def apply_ccx(self, qc1, qc2, qi):
+        """Apply the Double Controlled  X / Not gate, with control qubits qc1\n
+        and qc2, and target qubit qi
+        """
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits")
+        if len({qc1, qc2, qi}) != 3: raise Exception("Control and target qubits need to be unique")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            if ((basis_state >> qc1) & 1) and ((basis_state >> qc2) & 1): # if both controls
+                new_state[basis_state ^ (1 << qi)] += amp
+            else: # one of the controls is 0, no change
+                new_state[basis_state] += amp
+        self.state = new_state
+        self.clean_state()
+        self.check_normalization()
+        if self.trackHistory: self.history.append(self.state)
+        return self.state
+    
+    def apply_controlled(self, gate_name, qc, qi, *args):
+        """Apply an arbitrary Controlled gate on qubits\n
+        Supports an arbitrary number of control qubits qc, and the correct number\n
+        of qubits for the given gate as targets in qi\n
+        Use *args for values like theta/phi for rotation gates"""
+        if self.qudit != 2: raise Exception("This gate can only be applied on qubits")
+        if len(set(qc).add(set(qi))) != len(qc) + len(qi): raise Exception("Control and target qubits need to be unique")
+        new_state = defaultdict(int)
+        for basis_state,amp in self.state.items():
+            if all(((basis_state >> q) & 1) for q in qc): # check all control qubits are 1
+                apply_gate = getattr(self, f"apply_{gate_name}")
+                apply_gate(*qi, *args)
+            else: # one of the controls is 0, no change
                 new_state[basis_state] += amp
         self.state = new_state
         self.clean_state()
